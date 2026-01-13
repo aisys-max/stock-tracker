@@ -1,8 +1,10 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Search, TrendingUp, TrendingDown, X, Plus } from 'lucide-react';
+import { Search, TrendingUp, TrendingDown, X, Plus, LogOut, User } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import { supabase } from '@/lib/supabase';
+import type { User as SupabaseUser } from '@supabase/supabase-js';
 
 interface StockInfo {
   symbol: string;
@@ -20,30 +22,107 @@ interface ChartDataPoint {
   price: number;
 }
 
-interface ApiKeys {
-  alphaVantage: string;
-  finnhub: string;
-}
-
 export default function StockTracker() {
+  const [user, setUser] = useState<SupabaseUser | null>(null);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [isLogin, setIsLogin] = useState(true);
+  const [authLoading, setAuthLoading] = useState(false);
+
   const [watchlist, setWatchlist] = useState<StockInfo[]>([]);
   const [searchSymbol, setSearchSymbol] = useState('');
   const [selectedStock, setSelectedStock] = useState<StockInfo | null>(null);
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
   const [loading, setLoading] = useState(false);
-  const [showApiInput, setShowApiInput] = useState(false);
 
   useEffect(() => {
-    const saved = localStorage.getItem('stockWatchlist');
-    if (saved) setWatchlist(JSON.parse(saved));
+    checkUser();
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      setUser(session?.user ?? null);
+      if (session?.user) {
+        loadWatchlist(session.user.id);
+      }
+    });
+
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
   }, []);
 
-  useEffect(() => {
-    localStorage.setItem('stockWatchlist', JSON.stringify(watchlist));
-  }, [watchlist]);
+  const checkUser = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    setUser(session?.user ?? null);
+    if (session?.user) {
+      loadWatchlist(session.user.id);
+    }
+  };
 
-  const saveApiKeys = () => {
-    setShowApiInput(false);
+  const loadWatchlist = async (userId: string) => {
+    const { data, error } = await supabase
+      .from('watchlists')
+      .select('stocks')
+      .eq('user_id', userId)
+      .single();
+
+    if (data && data.stocks) {
+      setWatchlist(data.stocks);
+    }
+  };
+
+  const saveWatchlistToSupabase = async (newWatchlist: StockInfo[]) => {
+    if (!user) return;
+
+    console.log('Saving watchlist for user:', user.id);
+    console.log('Watchlist data:', newWatchlist);
+
+    const { data, error } = await supabase
+      .from('watchlists')
+      .upsert({
+        user_id: user.id,
+        stocks: newWatchlist,
+        updated_at: new Date().toISOString()
+      }, {
+        onConflict: 'user_id'
+      });
+
+    if (error) {
+      console.error('Error saving watchlist:', error);
+      alert(`워치리스트 저장 실패: ${error.message}`);
+    } else {
+      console.log('Watchlist saved successfully:', data);
+    }
+  };
+
+  const handleAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthLoading(true);
+
+    try {
+      if (isLogin) {
+        const { error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.auth.signUp({
+          email,
+          password,
+        });
+        if (error) throw error;
+        alert('회원가입 완료! 이메일을 확인해주세요.');
+      }
+    } catch (error: any) {
+      alert(error.message);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setWatchlist([]);
   };
 
   const isKoreanStock = (symbol: string) => {
@@ -57,14 +136,11 @@ export default function StockTracker() {
     return symbol;
   };
 
-  const fetchKoreanStockYahoo = async (symbol: string) => {
-    const formattedSymbol = formatKoreanSymbol(symbol);
+  const fetchStockYahoo = async (symbol: string) => {
+    const formattedSymbol = isKoreanStock(symbol) ? formatKoreanSymbol(symbol) : symbol;
 
     try {
-      // 우리의 API Route를 통해 호출 (CORS 문제 해결)
-      const quoteRes = await fetch(
-        `/api/stock?symbol=${formattedSymbol}`
-      );
+      const quoteRes = await fetch(`/api/stock?symbol=${formattedSymbol}`);
       const data = await quoteRes.json();
       console.log('Yahoo Finance response:', data);
 
@@ -87,67 +163,11 @@ export default function StockTracker() {
           high: meta.regularMarketDayHigh || currentPrice,
           low: meta.regularMarketDayLow || currentPrice,
           volume: meta.regularMarketVolume?.toString() || 'N/A',
-          market: '한국'
+          market: isKoreanStock(symbol) ? '한국' : '미국'
         };
 
         setSelectedStock(stockInfo);
 
-        // 차트 데이터 생성
-        if (timestamps && quote.close) {
-          const formattedData: ChartDataPoint[] = timestamps.map((timestamp: number, index: number) => {
-            const date = new Date(timestamp * 1000);
-            return {
-              date: `${date.getMonth() + 1}/${date.getDate()}`,
-              price: quote.close[index]
-            };
-          }).filter((item: ChartDataPoint) => item.price !== null);
-
-          setChartData(formattedData);
-        }
-      } else {
-        alert('주식 데이터를 찾을 수 없습니다. 티커 심볼을 확인해주세요.\n한국 주식은 005930.KS 형식으로 입력해주세요.');
-      }
-    } catch (error) {
-      console.error('Error:', error);
-      alert('데이터를 가져오는 중 오류가 발생했습니다: ' + (error as Error).message);
-    }
-  };
-
-  const fetchUSStock = async (symbol: string) => {
-    try {
-      console.log('Fetching US stock:', symbol);
-      // Yahoo Finance를 사용 (API Route 통해서)
-      const quoteRes = await fetch(
-        `/api/stock?symbol=${symbol}`
-      );
-      const data = await quoteRes.json();
-      console.log('Yahoo Finance response:', data);
-
-      if (data.chart && data.chart.result && data.chart.result[0]) {
-        const result = data.chart.result[0];
-        const meta = result.meta;
-        const quote = result.indicators.quote[0];
-        const timestamps = result.timestamp;
-
-        const currentPrice = meta.regularMarketPrice;
-        const previousClose = meta.chartPreviousClose || meta.previousClose;
-        const change = currentPrice - previousClose;
-        const changePercent = ((change / previousClose) * 100).toFixed(2);
-
-        const stockInfo: StockInfo = {
-          symbol: symbol.toUpperCase(),
-          price: currentPrice,
-          change: change,
-          changePercent: `${changePercent}%`,
-          high: meta.regularMarketDayHigh || currentPrice,
-          low: meta.regularMarketDayLow || currentPrice,
-          volume: meta.regularMarketVolume?.toString() || 'N/A',
-          market: '미국'
-        };
-
-        setSelectedStock(stockInfo);
-
-        // 차트 데이터 생성
         if (timestamps && quote.close) {
           const formattedData: ChartDataPoint[] = timestamps.map((timestamp: number, index: number) => {
             const date = new Date(timestamp * 1000);
@@ -170,32 +190,32 @@ export default function StockTracker() {
 
   const fetchStockData = async (symbol: string) => {
     setLoading(true);
-    setChartData([]); // 차트 데이터 초기화
-    setSelectedStock(null); // 선택된 주식 초기화
+    setChartData([]);
+    setSelectedStock(null);
 
-    if (isKoreanStock(symbol)) {
-      await fetchKoreanStockYahoo(symbol);
-    } else {
-      await fetchUSStock(symbol);
-    }
+    await fetchStockYahoo(symbol);
 
     setLoading(false);
   };
 
-  const addToWatchlist = () => {
+  const addToWatchlist = async () => {
     if (selectedStock && !watchlist.find(s => s.symbol === selectedStock.symbol)) {
-      setWatchlist([...watchlist, selectedStock]);
+      const newWatchlist = [...watchlist, selectedStock];
+      setWatchlist(newWatchlist);
+      await saveWatchlistToSupabase(newWatchlist);
     }
   };
 
-  const removeFromWatchlist = (symbol: string) => {
-    setWatchlist(watchlist.filter(s => s.symbol !== symbol));
+  const removeFromWatchlist = async (symbol: string) => {
+    const newWatchlist = watchlist.filter(s => s.symbol !== symbol);
+    setWatchlist(newWatchlist);
+    await saveWatchlistToSupabase(newWatchlist);
   };
 
   const handleSearch = () => {
     const trimmedSymbol = searchSymbol.trim().toUpperCase();
     if (trimmedSymbol) {
-      setSearchSymbol(''); // 검색창 초기화
+      setSearchSymbol('');
       fetchStockData(trimmedSymbol);
     }
   };
@@ -206,33 +226,68 @@ export default function StockTracker() {
     }
   };
 
-  if (showApiInput) {
+  if (!user) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center p-4">
-        <div className="bg-white rounded-lg shadow-xl p-8 max-w-2xl w-full">
-          <h2 className="text-2xl font-bold text-gray-800 mb-4">환영합니다! 🎉</h2>
+        <div className="bg-white rounded-lg shadow-xl p-8 max-w-md w-full">
+          <h2 className="text-3xl font-bold text-gray-800 mb-2 text-center">
+            📈 주가 트래커
+          </h2>
+          <p className="text-gray-600 mb-6 text-center text-sm">
+            로그인하고 나만의 관심 종목을 관리하세요
+          </p>
 
-          <div className="bg-green-50 border-l-4 border-green-400 p-4 mb-6">
-            <p className="text-sm text-green-700 font-semibold mb-2">
-              ✅ 완전 무료! API 키 불필요
-            </p>
-            <p className="text-xs text-green-600">
-              • 미국 주식 (AAPL, INTC, MSFT 등) 무제한 조회<br />
-              • 한국 주식 (005930.KS 삼성전자 등) 무제한 조회<br />
-              • Yahoo Finance 사용 - 안정적이고 빠름
-            </p>
+          <div className="flex gap-2 mb-6">
+            <button
+              onClick={() => setIsLogin(true)}
+              className={`flex-1 py-2 rounded-lg transition ${
+                isLogin ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'
+              }`}
+            >
+              로그인
+            </button>
+            <button
+              onClick={() => setIsLogin(false)}
+              className={`flex-1 py-2 rounded-lg transition ${
+                !isLogin ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'
+              }`}
+            >
+              회원가입
+            </button>
           </div>
 
-          <button
-            onClick={saveApiKeys}
-            className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 transition font-semibold"
-          >
-            시작하기 →
-          </button>
+          <div className="space-y-4">
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="이메일"
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="비밀번호"
+              onKeyPress={(e) => e.key === 'Enter' && handleAuth(e as any)}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <button
+              onClick={handleAuth}
+              disabled={authLoading}
+              className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 transition font-semibold disabled:opacity-50"
+            >
+              {authLoading ? '처리중...' : isLogin ? '로그인' : '회원가입'}
+            </button>
+          </div>
 
-          <p className="text-xs text-gray-500 mt-4 text-center">
-            모든 데이터는 브라우저에만 저장됩니다
-          </p>
+          <div className="mt-6 pt-6 border-t border-gray-200">
+            <p className="text-xs text-gray-500 text-center">
+              ✅ 무료, 무제한 주가 조회<br/>
+              ✅ 미국 + 한국 주식 지원<br/>
+              ✅ 클라우드 동기화
+            </p>
+          </div>
         </div>
       </div>
     );
@@ -241,9 +296,24 @@ export default function StockTracker() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 p-4">
       <div className="max-w-6xl mx-auto">
-        <div className="mb-8">
-          <h1 className="text-4xl font-bold text-white mb-2">📈 글로벌 주가 트래커</h1>
-          <p className="text-gray-400">미국 + 한국 주식 실시간 정보 (무료, 무제한)</p>
+        <div className="mb-8 flex justify-between items-center">
+          <div>
+            <h1 className="text-4xl font-bold text-white mb-2">📈 글로벌 주가 트래커</h1>
+            <p className="text-gray-400">미국 + 한국 주식 실시간 정보</p>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 text-white">
+              <User size={20} />
+              <span className="text-sm">{user.email}</span>
+            </div>
+            <button
+              onClick={handleLogout}
+              className="flex items-center gap-2 px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-600 transition"
+            >
+              <LogOut size={18} />
+              로그아웃
+            </button>
+          </div>
         </div>
 
         <div className="mb-8">
@@ -283,8 +353,9 @@ export default function StockTracker() {
                   {watchlist.map((stock) => (
                     <div
                       key={stock.symbol}
-                      className={`bg-slate-700 p-4 rounded-lg cursor-pointer hover:bg-slate-600 transition ${selectedStock?.symbol === stock.symbol ? 'ring-2 ring-blue-500' : ''
-                        }`}
+                      className={`bg-slate-700 p-4 rounded-lg cursor-pointer hover:bg-slate-600 transition ${
+                        selectedStock?.symbol === stock.symbol ? 'ring-2 ring-blue-500' : ''
+                      }`}
                       onClick={() => {
                         console.log('Clicking watchlist item:', stock.symbol);
                         fetchStockData(stock.symbol);
@@ -309,8 +380,9 @@ export default function StockTracker() {
                         <span className="text-2xl font-bold text-white">
                           {stock.market === '한국' ? '₩' : '$'}{stock.price?.toFixed(2)}
                         </span>
-                        <span className={`flex items-center text-sm ${stock.change >= 0 ? 'text-green-400' : 'text-red-400'
-                          }`}>
+                        <span className={`flex items-center text-sm ${
+                          stock.change >= 0 ? 'text-green-400' : 'text-red-400'
+                        }`}>
                           {stock.change >= 0 ? <TrendingUp size={16} /> : <TrendingDown size={16} />}
                           {stock.changePercent}
                         </span>
@@ -345,8 +417,9 @@ export default function StockTracker() {
                       <span className="text-5xl font-bold text-white">
                         {selectedStock.market === '한국' ? '₩' : '$'}{selectedStock.price?.toFixed(2)}
                       </span>
-                      <span className={`flex items-center text-xl mb-2 ${selectedStock.change >= 0 ? 'text-green-400' : 'text-red-400'
-                        }`}>
+                      <span className={`flex items-center text-xl mb-2 ${
+                        selectedStock.change >= 0 ? 'text-green-400' : 'text-red-400'
+                      }`}>
                         {selectedStock.change >= 0 ? <TrendingUp size={24} /> : <TrendingDown size={24} />}
                         {selectedStock.change?.toFixed(2)} ({selectedStock.changePercent})
                       </span>
