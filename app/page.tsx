@@ -28,6 +28,7 @@ export default function StockTracker() {
   const [password, setPassword] = useState('');
   const [isLogin, setIsLogin] = useState(true);
   const [authLoading, setAuthLoading] = useState(false);
+  const [showResetPassword, setShowResetPassword] = useState(false);
 
   const [watchlist, setWatchlist] = useState<StockInfo[]>([]);
   const [searchSymbol, setSearchSymbol] = useState('');
@@ -91,6 +92,28 @@ export default function StockTracker() {
       alert(`워치리스트 저장 실패: ${error.message}`);
     } else {
       console.log('Watchlist saved successfully:', data);
+    }
+  };
+
+  const handleResetPasswordRequest = async () => {
+    if (!email) {
+      alert('이메일을 입력해주세요');
+      return;
+    }
+
+    setAuthLoading(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+
+      if (error) throw error;
+      alert('비밀번호 재설정 이메일을 발송했습니다. 이메일을 확인해주세요.');
+      setShowResetPassword(false);
+    } catch (error: any) {
+      alert(`오류: ${error.message}`);
+    } finally {
+      setAuthLoading(false);
     }
   };
 
@@ -238,6 +261,45 @@ export default function StockTracker() {
   };
 
   if (!user) {
+    if (showResetPassword) {
+      return (
+        <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-xl p-8 max-w-md w-full">
+            <h2 className="text-3xl font-bold text-gray-800 mb-2 text-center">
+              🔑 비밀번호 찾기
+            </h2>
+            <p className="text-gray-600 mb-6 text-center text-sm">
+              가입한 이메일을 입력하면 비밀번호 재설정 링크를 보내드립니다
+            </p>
+
+            <div className="space-y-4">
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="이메일"
+                onKeyPress={(e) => e.key === 'Enter' && handleResetPasswordRequest()}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <button
+                onClick={handleResetPasswordRequest}
+                disabled={authLoading}
+                className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 transition font-semibold disabled:opacity-50"
+              >
+                {authLoading ? '전송 중...' : '재설정 이메일 보내기'}
+              </button>
+              <button
+                onClick={() => setShowResetPassword(false)}
+                className="w-full text-gray-600 py-2 hover:text-gray-800"
+              >
+                ← 로그인으로 돌아가기
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center p-4">
         <div className="bg-white rounded-lg shadow-xl p-8 max-w-md w-full">
@@ -290,13 +352,27 @@ export default function StockTracker() {
             >
               {authLoading ? '처리중...' : isLogin ? '로그인' : '회원가입'}
             </button>
+
+            {isLogin && (
+              <button
+                onClick={() => setShowResetPassword(true)}
+                className="w-full text-sm text-gray-600 hover:text-blue-600 mt-2"
+              >
+                비밀번호를 잊으셨나요?
+              </button>
+            )}
           </div>
 
           <div className="mt-6 pt-6 border-t border-gray-200">
-            <p className="text-xs text-gray-500 text-center">
+            <p className="text-xs text-gray-500 text-center mb-4">
               ✅ 무료, 무제한 주가 조회<br/>
               ✅ 미국 + 한국 주식 지원<br/>
               ✅ 클라우드 동기화
+            </p>
+            <p className="text-xs text-gray-400 text-center">
+              💡 로그인 문제가 있나요?<br/>
+              Supabase에서 "Enable email confirmations"을 OFF하거나<br/>
+              관리자에게 문의하세요
             </p>
           </div>
         </div>
