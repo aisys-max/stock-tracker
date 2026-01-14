@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Search, TrendingUp, TrendingDown, X, Plus, LogOut, User } from 'lucide-react';
+import { Search, TrendingUp, TrendingDown, X, Plus, LogOut, User, RefreshCw } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { supabase } from '@/lib/supabase';
 import type { User as SupabaseUser } from '@supabase/supabase-js';
@@ -35,6 +35,8 @@ export default function StockTracker() {
   const [selectedStock, setSelectedStock] = useState<StockInfo | null>(null);
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
   const [loading, setLoading] = useState(false);
+  const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   useEffect(() => {
     checkUser();
@@ -50,6 +52,57 @@ export default function StockTracker() {
       authListener.subscription.unsubscribe();
     };
   }, []);
+
+  // 워치리스트 자동 업데이트 (5분마다)
+  useEffect(() => {
+    if (!user || watchlist.length === 0) return;
+
+    const updateWatchlistPrices = async () => {
+      console.log('Updating watchlist prices...');
+      const updatedWatchlist = await Promise.all(
+        watchlist.map(async (stock) => {
+          try {
+            const response = await fetch(`/api/stock?symbol=${stock.symbol}`);
+            const data = await response.json();
+
+            if (data.chart?.result?.[0]) {
+              const result = data.chart.result[0];
+              const meta = result.meta;
+              const currentPrice = meta.regularMarketPrice;
+              const previousClose = meta.chartPreviousClose || meta.previousClose;
+              const change = currentPrice - previousClose;
+              const changePercent = ((change / previousClose) * 100).toFixed(2);
+
+              return {
+                ...stock,
+                price: currentPrice,
+                change: change,
+                changePercent: `${changePercent}%`,
+                high: meta.regularMarketDayHigh || currentPrice,
+                low: meta.regularMarketDayLow || currentPrice,
+                volume: meta.regularMarketVolume?.toString() || stock.volume,
+              };
+            }
+            return stock;
+          } catch (error) {
+            console.error(`Error updating ${stock.symbol}:`, error);
+            return stock;
+          }
+        })
+      );
+
+      setWatchlist(updatedWatchlist);
+      await saveWatchlistToSupabase(updatedWatchlist);
+    };
+
+    // 즉시 한 번 실행
+    updateWatchlistPrices();
+
+    // 5분마다 자동 업데이트
+    const interval = setInterval(updateWatchlistPrices, 5 * 60 * 1000);
+
+    return () => clearInterval(interval);
+  }, [user, watchlist.length]);
 
   const checkUser = async () => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -236,7 +289,57 @@ export default function StockTracker() {
     if (selectedStock && !watchlist.find(s => s.symbol === selectedStock.symbol)) {
       const newWatchlist = [...watchlist, selectedStock];
       setWatchlist(newWatchlist);
+      setLastUpdate(new Date());
       await saveWatchlistToSupabase(newWatchlist);
+    }
+  };
+
+  const refreshWatchlist = async () => {
+    if (watchlist.length === 0 || isRefreshing) return;
+
+    setIsRefreshing(true);
+    console.log('Manual refresh triggered...');
+
+    try {
+      const updatedWatchlist = await Promise.all(
+        watchlist.map(async (stock) => {
+          try {
+            const response = await fetch(`/api/stock?symbol=${stock.symbol}`);
+            const data = await response.json();
+
+            if (data.chart?.result?.[0]) {
+              const result = data.chart.result[0];
+              const meta = result.meta;
+              const currentPrice = meta.regularMarketPrice;
+              const previousClose = meta.chartPreviousClose || meta.previousClose;
+              const change = currentPrice - previousClose;
+              const changePercent = ((change / previousClose) * 100).toFixed(2);
+
+              return {
+                ...stock,
+                price: currentPrice,
+                change: change,
+                changePercent: `${changePercent}%`,
+                high: meta.regularMarketDayHigh || currentPrice,
+                low: meta.regularMarketDayLow || currentPrice,
+                volume: meta.regularMarketVolume?.toString() || stock.volume,
+              };
+            }
+            return stock;
+          } catch (error) {
+            console.error(`Error updating ${stock.symbol}:`, error);
+            return stock;
+          }
+        })
+      );
+
+      setWatchlist(updatedWatchlist);
+      setLastUpdate(new Date());
+      await saveWatchlistToSupabase(updatedWatchlist);
+    } catch (error) {
+      console.error('Error refreshing watchlist:', error);
+    } finally {
+      setIsRefreshing(false);
     }
   };
 
@@ -313,17 +416,15 @@ export default function StockTracker() {
           <div className="flex gap-2 mb-6">
             <button
               onClick={() => setIsLogin(true)}
-              className={`flex-1 py-2 rounded-lg transition ${
-                isLogin ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'
-              }`}
+              className={`flex-1 py-2 rounded-lg transition ${isLogin ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'
+                }`}
             >
               로그인
             </button>
             <button
               onClick={() => setIsLogin(false)}
-              className={`flex-1 py-2 rounded-lg transition ${
-                !isLogin ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'
-              }`}
+              className={`flex-1 py-2 rounded-lg transition ${!isLogin ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'
+                }`}
             >
               회원가입
             </button>
@@ -365,13 +466,13 @@ export default function StockTracker() {
 
           <div className="mt-6 pt-6 border-t border-gray-200">
             <p className="text-xs text-gray-500 text-center mb-4">
-              ✅ 무료, 무제한 주가 조회<br/>
-              ✅ 미국 + 한국 주식 지원<br/>
+              ✅ 무료, 무제한 주가 조회<br />
+              ✅ 미국 + 한국 주식 지원<br />
               ✅ 클라우드 동기화
             </p>
             <p className="text-xs text-gray-400 text-center">
-              💡 로그인 문제가 있나요?<br/>
-              Supabase에서 "Enable email confirmations"을 OFF하거나<br/>
+              💡 로그인 문제가 있나요?<br />
+              Supabase에서 "Enable email confirmations"을 OFF하거나<br />
               관리자에게 문의하세요
             </p>
           </div>
@@ -432,7 +533,27 @@ export default function StockTracker() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-1">
             <div className="bg-slate-800 rounded-lg p-6 shadow-xl">
-              <h2 className="text-xl font-bold text-white mb-4">관심 종목</h2>
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-bold text-white">관심 종목</h2>
+                <div className="flex items-center gap-3">
+                  {lastUpdate && (
+                    <span className="text-xs text-gray-500">
+                      {lastUpdate.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  )}
+                  <button
+                    onClick={refreshWatchlist}
+                    disabled={isRefreshing || watchlist.length === 0}
+                    className="p-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="새로고침"
+                  >
+                    <RefreshCw
+                      size={16}
+                      className={`text-gray-400 ${isRefreshing ? 'animate-spin' : ''}`}
+                    />
+                  </button>
+                </div>
+              </div>
               {watchlist.length === 0 ? (
                 <p className="text-gray-400 text-sm">관심 종목을 추가해보세요</p>
               ) : (
@@ -440,9 +561,8 @@ export default function StockTracker() {
                   {watchlist.map((stock) => (
                     <div
                       key={stock.symbol}
-                      className={`bg-slate-700 p-4 rounded-lg cursor-pointer hover:bg-slate-600 transition ${
-                        selectedStock?.symbol === stock.symbol ? 'ring-2 ring-blue-500' : ''
-                      }`}
+                      className={`bg-slate-700 p-4 rounded-lg cursor-pointer hover:bg-slate-600 transition ${selectedStock?.symbol === stock.symbol ? 'ring-2 ring-blue-500' : ''
+                        }`}
                       onClick={() => {
                         console.log('Clicking watchlist item:', stock.symbol);
                         fetchStockData(stock.symbol);
@@ -467,9 +587,8 @@ export default function StockTracker() {
                         <span className="text-2xl font-bold text-white">
                           {stock.market === '한국' ? '₩' : '$'}{stock.price?.toFixed(2)}
                         </span>
-                        <span className={`flex items-center text-sm ${
-                          stock.change >= 0 ? 'text-green-400' : 'text-red-400'
-                        }`}>
+                        <span className={`flex items-center text-sm ${stock.change >= 0 ? 'text-green-400' : 'text-red-400'
+                          }`}>
                           {stock.change >= 0 ? <TrendingUp size={16} /> : <TrendingDown size={16} />}
                           {stock.changePercent}
                         </span>
@@ -504,9 +623,8 @@ export default function StockTracker() {
                       <span className="text-5xl font-bold text-white">
                         {selectedStock.market === '한국' ? '₩' : '$'}{selectedStock.price?.toFixed(2)}
                       </span>
-                      <span className={`flex items-center text-xl mb-2 ${
-                        selectedStock.change >= 0 ? 'text-green-400' : 'text-red-400'
-                      }`}>
+                      <span className={`flex items-center text-xl mb-2 ${selectedStock.change >= 0 ? 'text-green-400' : 'text-red-400'
+                        }`}>
                         {selectedStock.change >= 0 ? <TrendingUp size={24} /> : <TrendingDown size={24} />}
                         {selectedStock.change?.toFixed(2)} ({selectedStock.changePercent})
                       </span>
