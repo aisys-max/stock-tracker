@@ -100,21 +100,32 @@ export default function StockTracker() {
 
     try {
       if (isLogin) {
-        const { error } = await supabase.auth.signInWithPassword({
+        const { data, error } = await supabase.auth.signInWithPassword({
           email,
           password,
         });
         if (error) throw error;
+        console.log('Login successful:', data);
       } else {
-        const { error } = await supabase.auth.signUp({
+        const { data, error } = await supabase.auth.signUp({
           email,
           password,
+          options: {
+            emailRedirectTo: `${window.location.origin}`,
+          }
         });
         if (error) throw error;
-        alert('회원가입 완료! 이메일을 확인해주세요.');
+        console.log('Signup response:', data);
+
+        if (data.user?.identities?.length === 0) {
+          alert('이미 가입된 이메일입니다. 로그인해주세요.');
+        } else {
+          alert('회원가입 완료! 이메일 확인이 필요없다면 바로 로그인하세요.\n(개발 모드에서는 이메일 확인 생략 가능)');
+        }
       }
     } catch (error: any) {
-      alert(error.message);
+      console.error('Auth error:', error);
+      alert(`오류: ${error.message || error.error_description || '알 수 없는 오류'}`);
     } finally {
       setAuthLoading(false);
     }
