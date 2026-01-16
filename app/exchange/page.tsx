@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { ArrowLeftRight, TrendingUp, TrendingDown, RefreshCw, Calculator, ArrowLeft } from 'lucide-react';
+import { ArrowLeftRight, TrendingUp, TrendingDown, RefreshCw, Calculator, ArrowLeft, LayoutDashboard } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 
 interface ExchangeRate {
     pair: string;
@@ -111,13 +112,22 @@ export default function ExchangePage() {
             <div className="max-w-6xl mx-auto">
                 {/* 헤더 */}
                 <div className="mb-8">
-                    <button
-                        onClick={() => router.push('/')}
-                        className="flex items-center gap-2 text-gray-400 hover:text-white mb-4 transition"
-                    >
-                        <ArrowLeft size={20} />
-                        주가 트래커로 돌아가기
-                    </button>
+                    <div className="flex items-center justify-between mb-4">
+                        <button
+                            onClick={() => router.push('/')}
+                            className="flex items-center gap-2 text-gray-400 hover:text-white transition"
+                        >
+                            <ArrowLeft size={20} />
+                            뒤로 가기
+                        </button>
+                        <Link
+                            href="/dashboard"
+                            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white rounded-lg transition text-sm font-semibold shadow-lg"
+                        >
+                            <LayoutDashboard size={18} />
+                            통합 대시보드
+                        </Link>
+                    </div>
                     <div className="flex items-center gap-3 mb-2">
                         <ArrowLeftRight className="text-blue-400" size={32} />
                         <h1 className="text-4xl font-bold text-white">환율 트래커</h1>
