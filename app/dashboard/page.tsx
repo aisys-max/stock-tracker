@@ -359,10 +359,13 @@ export default function DashboardPage() {
                                                             borderRadius: '8px',
                                                             color: '#fff'
                                                         }}
-                                                        formatter={(value: number) => [
-                                                            formatCurrency(value, stock.market),
-                                                            '가격'
-                                                        ]}
+                                                        formatter={(value: number | string | Array<number | string>) => {
+                                                            const numValue = typeof value === 'number' ? value : 0;
+                                                            return [
+                                                                formatCurrency(numValue, stock.market),
+                                                                '가격'
+                                                            ];
+                                                        }}
                                                     />
                                                     <Line
                                                         type="monotone"
