@@ -359,7 +359,7 @@ export default function DashboardPage() {
                                                             borderRadius: '8px',
                                                             color: '#fff'
                                                         }}
-                                                        formatter={(value: number | string | Array<number | string>) => {
+                                                        formatter={(value) => {
                                                             const numValue = typeof value === 'number' ? value : 0;
                                                             return [
                                                                 formatCurrency(numValue, stock.market),
