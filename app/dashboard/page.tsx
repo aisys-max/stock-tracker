@@ -227,8 +227,8 @@ export default function DashboardPage() {
                             key={`${pair.from}-${pair.to}`}
                             onClick={() => setSelectedPair(pair)}
                             className={`px-6 py-3 rounded-lg transition font-semibold ${selectedPair.from === pair.from && selectedPair.to === pair.to
-                                    ? 'bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-lg'
-                                    : 'bg-slate-800 text-gray-300 hover:bg-slate-700 border border-slate-700'
+                                ? 'bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-lg'
+                                : 'bg-slate-800 text-gray-300 hover:bg-slate-700 border border-slate-700'
                                 }`}
                         >
                             {pair.symbol} {pair.label}
@@ -272,7 +272,10 @@ export default function DashboardPage() {
                                             borderRadius: '8px',
                                             color: '#fff'
                                         }}
-                                        formatter={(value: number) => [value.toFixed(2), '환율']}
+                                        formatter={(value) => {
+                                            const numValue = typeof value === 'number' ? value : 0;
+                                            return [numValue.toFixed(2), '환율'];
+                                        }}
                                     />
                                     <Line
                                         type="monotone"
